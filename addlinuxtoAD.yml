@@ -1,0 +1,108 @@
+---
+#ansible-playbook addlinuxtoAD.yml --ask-pass
+
+- name: Add Linux VM to AD
+  hosts: 
+  remote_user: root
+  
+  vars:
+    full_domain: 
+    domain_controller: 
+    username: 
+    password: 
+
+  tasks:
+        #Capitlizes full_domain
+      - shell: echo {{full_domain}} | tr [:lower:] [:upper:]
+        args: 
+          executable: /bin/bash
+        register: uppercase_full_domain
+        
+        #Gets root part of domain before period and capitlizes it
+      - shell: temp={{full_domain}}; arr=(${temp//./ }); echo ${arr[0]} | tr [:lower:] [:upper:]
+        args: 
+          executable: /bin/bash
+        register: upper_domain
+          
+      - name: Install Samba and Winbind to join Domain Controller
+        apt:  
+          state: present
+          name:
+            - krb5-user
+            - libpam-krb5
+            - libpam-ccreds
+            - samba
+            - winbind
+  
+      - name: Update default_realm in /etc/krb5.conf
+        shell: sed -i 's/default_realm = ATHENA.MIT.EDU/default_realm = {{uppercase_full_domain.stdout}}/g' /etc/krb5.conf
+        args:
+          executable: /bin/bash
+
+      - name: Remove pre-populated domain information in /etc/krb5.conf
+        shell: sed -i '/\[realms]/q' /etc/krb5.conf 
+        args:
+          executable: /bin/bash
+          
+      - name: Add domain information to /etc/krb5.conf
+        shell: |
+          echo '
+          {{uppercase_full_domain.stdout}} = {
+              kdc            =       {{domain_controller}}   # domain specific parameter (domain controller name)
+              admin_server   =       {{domain_controller}}   # domain specific parameter (domain controller name)
+              default_domain =       {{uppercase_full_domain.stdout}}       # domain specific parameter (full domain name)
+          }
+         
+          [domain_realm]
+          
+          .{{full_domain}} = {{uppercase_full_domain.stdout}}  # domain specific parameter (domain name for dns names)
+          {{full_domain}} = {{uppercase_full_domain.stdout}}   # domain specific parameter (domain name for dns names)
+          ' >> /etc/krb5.conf
+        args:
+          executable: /bin/bash
+          
+      - name: Update workgroup in /etc/samba/smb.conf
+        shell: sed -i 's/workgroup = WORKGROUP/workgroup = {{upper_domain.stdout}}/g' /etc/samba/smb.conf
+        args:
+          executable: /bin/bash
+          
+      - name: Adds realm and security fields to /etc/samba/smb.conf
+        shell: sed -i '/workgroup = {{upper_domain.stdout}}/a \ \ \ realm = {{uppercase_full_domain.stdout}} \n \ \ security = ADS' /etc/samba/smb.conf
+        args:
+          executable: /bin/bash
+          
+      - name: Enable winbind service
+        ansible.builtin.service:
+          name: winbind
+          state: started
+          enabled: yes
+          
+      - name: Update /etc/hosts to prevent No DNS domain configured error
+        shell: server=$(hostname) && sed -i "s/127.0.1.1.*/127.0.1.1 ${server}.{{full_domain}} ${server}/g" /etc/hosts
+        args:
+          executable: /bin/bash
+       
+       #Example: OU=Linux,OU=Servers,DC=domain,DC=local
+      - name: Join AD domain
+        shell: net ads join createcomputer="Servers/Linux" -U {{username}}%{{password}} {{full_domain}}
+        args:
+          executable: /bin/bash
+          
+      - name: Register DNS and create A record
+        shell: net ads dns register -P
+        args:
+          executable: /bin/bash
+          
+      - name: Create PTR record
+        shell: |
+          num=$(ip a|grep -oP "inet \K[0-9.]*(?=.*[^ ][^l][^o]$)")
+          
+          IFS='.' read -ra ADDR <<< "$num"
+          for (( i=${{ "{" }}{{ "#" }}ADDR[@]}-1;i>=0;i-- )); do
+             temp+="${ADDR[i]}."
+          done
+          server=$(hostname) 
+          ip=$(echo $temp | sed 's/.$//')
+          echo -e "update add $ip.in-addr.arpa 300 PTR $server.{{full_domain}}.\nsend" | nsupdate
+        args:
+          executable: /bin/bash
