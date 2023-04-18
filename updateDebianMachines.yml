@@ -10,7 +10,7 @@
      snapshot_description: ""
      package_name: ""
      package_version: ""
-       
+     
   tasks: 
     - name: Create Snapshots
       delegate_to: "{{ proxmox_node }}"
