@@ -1,0 +1,42 @@
+---
+#ansible-playbook updateDebianMachines.yml --ask-pass
+#Create snapshot and then update {{package_name}}
+- name: Updates {{ package_name }}
+  hosts: 
+  remote_user: root
+  
+  vars:
+     proxmox_node: ""
+     snapshot_description: ""
+     package_name: ""
+     package_version: ""
+       
+  tasks: 
+    - name: Create Snapshots
+      delegate_to: "{{ proxmox_node }}"
+      run_once: true
+      shell: |
+        currentDate=$(date +"%Y_%m_%d_%H_%M_%S")
+        id=$(qm list | grep -w {{ item }} | cut -d ' ' -f8)
+        qm snapshot $id "{{ item }}_$currentDate" --description {{ snapshot_description }}
+      args: 
+        executable: /bin/bash
+		
+	  #Add VM names in loop section
+      loop:
+        - 
+        - 
+        
+    - name: Update {{ package_name }} to {{ package_version }}
+      apt:
+        name: 
+          - "{{ package_name }}={{ package_version }}"
+        state: present
+        update_cache: yes
+    
+    - shell: apt-cache policy {{ package_name }} | head -n 3         
+      args: 
+        executable: /bin/bash
+      register: output
+        
+    - debug: var=output.stdout_lines
