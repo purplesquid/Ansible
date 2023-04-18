@@ -21,8 +21,8 @@
         qm snapshot $id "{{ item }}_$currentDate" --description {{ snapshot_description }}
       args: 
         executable: /bin/bash
-		
-	  #Add VM names in loop section
+
+      #Add VM names in loop section
       loop:
         - 
         - 
